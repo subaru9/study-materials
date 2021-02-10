@@ -1,140 +1,53 @@
 defmodule PoolyV3.Server do
   @moduledoc """
-  Handles most of the logic
+  Top level logic
   """
   use GenServer
 
   require Logger
 
-  defmodule State do
-    defstruct sup: nil, size: nil, worker_mod: nil, workers: nil, monitors: nil
-  end
-
   # API
 
-  def start_link(init_args) do
-    GenServer.start_link(__MODULE__, init_args, name: __MODULE__)
+  def start_link(pools_config) do
+    GenServer.start_link(__MODULE__, pools_config, name: __MODULE__)
   end
 
-  def checkout() do
-    GenServer.call(__MODULE__, :checkout)
+  def checkout(pool_name) do
+    GenServer.call(:"#{pool_name}Server", :checkout)
   end
 
-  def checkin(worker_pid) do
-    GenServer.cast(__MODULE__, {:checkin, worker_pid})
+  def checkin(pool_name, worker_pid) do
+    GenServer.cast(:"#{pool_name}Server", {:checkin, worker_pid})
   end
 
-  def status do
-    GenServer.call(__MODULE__, :status)
+  def status(pool_name) do
+    GenServer.call(:"#{pool_name}Server", :status)
   end
 
   # Callbacks
 
-  def init([sup, pool_config] = _init_args) when is_pid(sup) do
-    Process.flag(:trap_exit, true)
-    monitors = :ets.new(:monitors, [:private])
-    init(pool_config, %State{sup: sup, monitors: monitors})
+  def init(pools_config) do
+    pools_config
+    |> Enum.each(fn pool_config ->
+      send(self(), {:start_pool, pool_config})
+    end)
+
+    {:ok, pools_config}
   end
 
-  def init([{:worker_mod, worker_mod} | rest], state) do
-    init(rest, %{state | worker_mod: worker_mod})
-  end
+  def handle_info({:start_pool, pool_config}, state) do
+    # Logger.warn(inspect(state))
 
-  def init([{:size, size} | rest], state) do
-    init(rest, %{state | size: size})
-  end
-
-  def init([_ | rest], state) do
-    init(rest, state)
-  end
-
-  def init([], state) do
-    send(self(), :start_worker_supervisor)
-    {:ok, state}
-  end
-
-  def handle_info(
-        :start_worker_supervisor,
-        state = %{
-          size: size,
-          worker_mod: worker_mod
+    {:ok, _pools_sup} =
+      DynamicSupervisor.start_child(
+        PoolyV3.PoolsSupervisor,
+        # {PoolyV3.PoolSupervisor, pool_config}
+        %{
+          id: :"#{pool_config[:name]}Supervisor",
+          start: {PoolyV3.PoolSupervisor, :start_link, [pool_config]}
         }
-      ) do
-    {:ok, _worker_sup} = PoolyV3.WorkerSupervisor.start_link([])
-
-    prepopulate(size, worker_mod)
+      )
 
     {:noreply, state}
-  end
-
-  def handle_info({:DOWN, ref, _, _, _}, state = %{monitors: monitors, workers: workers}) do
-    case :ets.match(monitors, {:"$1", ref}) do
-      [[pid]] ->
-        true = :ets.delete(monitors, pid)
-        new_state = %{state | workers: [pid|workers]}
-        {:noreply, new_state}
-      [[]] ->
-        {:noreply, state}
-    end
-  end
-
-  def handle_info({:EXIT, pid, _reason}, state = %{monitors: monitors,
-workers: workers, worker_mod: worker_mod}) do
-    case :ets.lookup(monitors, pid) do
-      [{pid, ref}] ->
-        true = Process.demonitor(ref)
-        true = :ets.delete(monitors, pid)
-        new_state = %{state | workers: [new_worker(worker_mod)|workers]}
-        {:noreply, new_state}
-      [[]] ->
-        {:noreply, state}
-    end
-  end
-
-  # Private functions
-
-  defp prepopulate(size, worker_mod) do
-    prepopulate(size, worker_mod, [])
-  end
-
-  defp prepopulate(size, _worker_mod, workers) when size < 1 do
-    workers
-  end
-
-  defp prepopulate(size, worker_mod, workers) do
-    prepopulate(size - 1, worker_mod, [new_worker(worker_mod) | workers])
-  end
-
-  defp new_worker(worker_mod) do
-    {:ok, worker} = PoolyV3.WorkerSupervisor.start_child(worker_mod)
-    worker
-  end
-
-  def handle_call(:status, _from, %{workers: workers, monitors: monitors} = state) do
-    {:reply, {length(workers), :ets.info(monitors, :size)}, state}
-  end
-
-  def handle_call(:checkout, {from_pid, _red}, %{workers: workers, monitors: monitors} = state) do
-    case workers do
-      [worker | rest] ->
-        ref = Process.monitor(from_pid)
-        true = :ets.insert(monitors, {worker, ref})
-        {:reply, worker, %{state | workers: rest}}
-
-      [] ->
-        {:reply, :noproc, state}
-    end
-  end
-
-  def handle_call({:checkin, worker}, %{workers: workers, monitors: monitors} = state) do
-    case :ets.lookup(monitors, worker) do
-      [{pid, ref}] ->
-        true = Process.demonitor(ref)
-        true = :ets.delete(monitors, pid)
-        {:noreply, worker, %{state | workers: [pid | workers]}}
-
-      [] ->
-        {:noreply, state}
-    end
   end
 end

@@ -5,7 +5,7 @@ defmodule PoolyV1.WorkerSupervisor do
 
   # Starts a module-based supervisor process with the given module and init_arg.
   def start_link(init_arg) do
-    DynamicSupervisor.start_link(__MODULE__, init_arg, name: __MODULE__, debug: [:trace])
+    DynamicSupervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
   end
 
   def start_child(child_spec) do
