@@ -1,6 +1,6 @@
 defmodule Sender do
   @moduledoc """
-  Using Task start.
+  Retrieving results from task.
   """
 
   def send_email(email) do
@@ -11,10 +11,11 @@ defmodule Sender do
 
   def notify_all(emails) do
     emails
-    |> Enum.each(fn email ->
-      Task.start(fn ->
+    |> Enum.map(fn email ->
+      Task.async(fn ->
         send_email(email)
       end)
     end)
+    |> Enum.map(&Task.await/1)
   end
 end
