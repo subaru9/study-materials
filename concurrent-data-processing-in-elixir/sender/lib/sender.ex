@@ -1,6 +1,6 @@
 defmodule Sender do
   @moduledoc """
-  Retrieving results from task.
+  Lasy input evaluation.
   """
 
   def send_email(email) do
@@ -11,11 +11,7 @@ defmodule Sender do
 
   def notify_all(emails) do
     emails
-    |> Enum.map(fn email ->
-      Task.async(fn ->
-        send_email(email)
-      end)
-    end)
-    |> Enum.map(&Task.await/1)
+    |> Task.async_stream(&send_email/1)
+    |> Enum.to_list()
   end
 end
