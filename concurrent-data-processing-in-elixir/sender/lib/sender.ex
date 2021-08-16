@@ -3,8 +3,9 @@ defmodule Sender do
   Lasy input evaluation.
   """
 
-  def send_email("hello@world.com" = email) do
-    raise "Couldn't send email to #{email}"
+  def send_email("hello@world.com" = _email) do
+    :error
+    # raise "Couldn't send email to #{email}"
   end
 
   def send_email(email) do
